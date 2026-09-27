@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Novel Reader</title>
 <style>
   :root {
@@ -29,16 +29,26 @@
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent);
                    min-width: 90px; }
+  button.link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 14px;
+                text-decoration: underline; text-underline-offset: 2px; }
   label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
   select { font: inherit; font-size: 14px; max-width: 240px; padding: 4px;
            background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
   input[type=range] { width: 110px; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
   #rateVal { min-width: 3.2em; color: var(--ink); font-variant-numeric: tabular-nums; }
   .spacer { flex: 1; }
-  #status { max-width: 780px; margin: 0 auto; padding: 0 16px 8px; font-size: 13px; color: var(--muted); }
+  #status, #tip { max-width: 780px; margin: 0 auto; padding: 0 16px 8px; font-size: 13px; color: var(--muted); }
   #status:empty { display: none; }
   #status.err { color: var(--err); }
   #status progress { width: 160px; height: 8px; vertical-align: middle; margin-left: 8px; accent-color: var(--accent); }
+  #tip { display: flex; gap: 10px; align-items: baseline; }
+  #tip .link { white-space: nowrap; }
+  #tip .x { margin-left: auto; border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: 18px; line-height: 1; }
+
+  /* Desktop: the dock's pieces sit inline in the top bar */
+  #dock, #controls, #settings { display: contents; }
+  #settingsBtn, #wakeWrap { display: none; }
 
   main { max-width: 780px; margin: 0 auto; padding: 24px 16px 120px; }
   textarea { width: 100%; min-height: 60vh; padding: 16px; resize: vertical;
@@ -49,41 +59,97 @@
   #reader { font: 19px/1.75 Georgia, "Times New Roman", serif; background: var(--panel);
             border: 1px solid var(--line); border-radius: 8px; padding: 28px 32px; }
   #reader p { margin: 0 0 1em; }
-  #reader .s { cursor: pointer; border-radius: 3px; transition: background .15s; }
-  #reader .s:hover { background: color-mix(in srgb, var(--hl) 45%, transparent); }
+  #reader .s { cursor: pointer; border-radius: 3px; transition: background .15s;
+               -webkit-tap-highlight-color: transparent; }
+  @media (hover: hover) { #reader .s:hover { background: color-mix(in srgb, var(--hl) 45%, transparent); } }
   #reader .s.cur { background: var(--hl); }
   #reader .s.cur.wait { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { background: color-mix(in srgb, var(--hl) 35%, transparent); } }
   #progress { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  dialog { max-width: 520px; width: calc(100% - 32px); border: 1px solid var(--line); border-radius: 10px;
+           background: var(--panel); color: var(--ink); padding: 20px 22px; }
+  dialog::backdrop { background: rgb(0 0 0 / .4); }
+  dialog h2 { font-size: 18px; margin: 0 0 10px; }
+  dialog ol { padding-left: 20px; margin: 8px 0; }
+  dialog li { margin: 4px 0; }
+  dialog p { margin: 8px 0; font-size: 15px; }
+  dialog .small { color: var(--muted); font-size: 13px; }
+  dialog .close { float: right; }
   [hidden] { display: none !important; }
-  @media (max-width: 560px) { #reader { padding: 18px; } }
+
+  /* Phones: one slim top row, controls docked at the bottom within thumb reach */
+  @media (max-width: 700px) {
+    .bar { flex-wrap: nowrap; gap: 10px; }
+    .bar h1 { flex: 1; }
+    .bar .spacer { display: none; }
+    #dock { display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+            background: var(--panel); border-top: 1px solid var(--line);
+            box-shadow: 0 -4px 16px rgb(0 0 0 / .08); padding-bottom: env(safe-area-inset-bottom); }
+    #controls { display: flex; gap: 10px; padding: 10px 16px; justify-content: center; }
+    #controls button { padding: 12px 16px; font-size: 18px; min-height: 48px; }
+    #playBtn { flex: 1; max-width: 240px; }
+    #stopBtn { order: -1; }
+    #settingsBtn { display: inline-block; }
+    .with-label { display: none; }
+    #settings { display: none; order: -1; flex-direction: column; gap: 16px; padding: 16px 16px 6px; }
+    #settings.open { display: flex; }
+    #settings label { justify-content: space-between; font-size: 15px; color: var(--ink); }
+    #settings select { flex: 1; min-width: 0; width: 100%; max-width: none; font-size: 16px; padding: 8px; margin-left: 12px; }
+    #settings input[type=range] { flex: 1; margin-left: 12px; }
+    #wakeWrap { display: flex; }
+    #wakeWrap[hidden] { display: none !important; }
+    #settings button.link { align-self: flex-start; font-size: 15px; }
+    #reader { padding: 18px; font-size: 18px; }
+    main { padding: 16px 12px calc(120px + env(safe-area-inset-bottom)); }
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
     <h1>Novel Reader</h1>
-    <button id="playBtn" class="primary">▶ Play</button>
-    <button id="stopBtn" title="Stop and go back to the start">■ Stop</button>
-    <label>Speed <input id="rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="rateVal">1.00×</span></label>
-    <label>Voice <select id="voice"></select></label>
+    <div id="dock">
+      <div id="controls">
+        <button id="playBtn" class="primary">▶ Play</button>
+        <button id="stopBtn" title="Stop and go back to the start" aria-label="Stop">■<span class="with-label"> Stop</span></button>
+        <button id="settingsBtn" aria-label="Speed and voice" aria-expanded="false" aria-controls="settings">⚙</button>
+      </div>
+      <div id="settings">
+        <label>Speed <input id="rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="rateVal">1.00×</span></label>
+        <label>Voice <select id="voice"></select></label>
+        <label id="wakeWrap" hidden>Keep screen on while reading <input id="wake" type="checkbox"></label>
+        <button id="tipsBtn" class="link">Get better voices</button>
+      </div>
+    </div>
     <span class="spacer"></span>
     <span id="progress"></span>
     <button id="editBtn">Edit text</button>
   </div>
   <div id="status"></div>
+  <div id="tip" hidden>
+    <span>Tip: your phone has free high-quality voices.</span>
+    <button class="link" id="tipLink">How to get them</button>
+    <button class="x" id="tipClose" aria-label="Dismiss tip">×</button>
+  </div>
 </header>
 
 <main>
   <section id="editView">
     <textarea id="text" placeholder="Paste your chapter here…"></textarea>
-    <p class="hint">Paste text, then press <b>Done</b> (or Play). In reading view, click any word to read from there. Space bar toggles play/pause.</p>
+    <p class="hint" id="hint">Paste text, then press <b>Done</b> (or Play). In reading view, click any word to read from there. Space bar toggles play/pause.</p>
     <p><button id="doneBtn" class="primary">Done</button></p>
   </section>
   <section id="readView" hidden>
     <div id="reader"></div>
   </section>
 </main>
+
+<dialog id="tipsDlg">
+  <form method="dialog"><button class="close">Close</button></form>
+  <h2>Get better voices (free)</h2>
+  <div id="tipsBody"></div>
+</dialog>
 
 <!-- Kokoro runs in a worker so generating audio never freezes the page -->
 <script id="kokoroWorker" type="text/plain">
@@ -113,6 +179,20 @@ const idbDo = (mode, fn) => idb.then(db => new Promise((res, rej) => {
   tx.oncomplete = () => res(req.result);
   tx.onerror = () => rej(tx.error);
 }));
+
+const progress = {}; let lastReport = 0;
+function report(url, loaded, total, force) {
+  progress[url] = [loaded, total];
+  const now = Date.now();
+  if (!force && now - lastReport < 200) return;
+  lastReport = now;
+  let l = 0, t = 0;
+  for (const [a, b] of Object.values(progress)) { l += a; t += b || a; }
+  postMessage({ type: 'progress', loaded: l, total: t });
+}
+
+// Download straight into a Blob (the browser can spill big blobs to disk) and hand the
+// library a response backed by that same Blob, so we never hold two copies in memory.
 const netFetch = self.fetch.bind(self);
 self.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input.url;
@@ -122,20 +202,21 @@ self.fetch = async (input, init) => {
     if (blob) return new Response(blob, { headers: { 'content-length': String(blob.size) } });
   } catch {}
   const res = await netFetch(input, init);
-  if (res.ok) res.clone().blob().then(b => idbDo('readwrite', s => s.put(b, url))).catch(() => {});
-  return res;
+  if (!res.ok || !res.body) return res;
+  const total = +res.headers.get('content-length') || 0;
+  let loaded = 0;
+  const counted = res.body.pipeThrough(new TransformStream({
+    transform(chunk, c) { loaded += chunk.byteLength; report(url, loaded, total); c.enqueue(chunk); },
+  }));
+  const blob = await new Response(counted).blob();
+  report(url, loaded, total, true);
+  idbDo('readwrite', s => s.put(blob, url)).catch(() => {});
+  return new Response(blob, { headers: { 'content-length': String(blob.size) } });
 };
 
 async function load(device, dtype) {
   const { KokoroTTS } = await import(LIB);
-  const files = {};
-  return KokoroTTS.from_pretrained(MODEL, { device, dtype, progress_callback: p => {
-    if (p.status !== 'progress' || !p.total) return;
-    files[p.file] = [p.loaded, p.total];
-    let loaded = 0, total = 0;
-    for (const [l, t] of Object.values(files)) { loaded += l; total += t; }
-    postMessage({ type: 'progress', loaded, total });
-  }});
+  return KokoroTTS.from_pretrained(MODEL, { device, dtype });
 }
 
 // Kokoro handles ~500 tokens per call; split very long sentences at clause breaks.
@@ -186,7 +267,20 @@ const synth = window.speechSynthesis;
 const store = {
   get(k, d) { try { const v = localStorage.getItem('novelReader.' + k); return v == null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem('novelReader.' + k, v); } catch {} },
+  del(k) { try { localStorage.removeItem('novelReader.' + k); } catch {} },
 };
+
+// Which device are we on? Phones and tablets get built-in voices only: the AI model
+// needs more memory than mobile browsers allow a tab and crashes it.
+const ua = navigator.userAgent;
+const device = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'ios'
+             : /Android/.test(ua) ? 'android'
+             : /Macintosh/.test(ua) ? 'mac'
+             : /Windows/.test(ua) ? 'windows' : 'other';
+const isMobile = device === 'ios' || device === 'android';
+
+// Let speech play even when an iPhone's silent switch is on (Safari 16.4+).
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
 
 let sentences = [];   // [{ text, el }]
 let cur = 0;          // index of the current sentence
@@ -194,6 +288,7 @@ let offset = 0;       // char offset into the current sentence to start from
 let playing = false;
 let gen = 0;          // bumps on every stop/restart so stale callbacks are ignored
 let voices = [];
+let speechUnlocked = false;
 
 // Kokoro voices worth using (graded C or better by the model authors)
 const KOKORO_VOICES = [
@@ -275,7 +370,16 @@ function setStatus(html, { err = false, fade = 0 } = {}) {
   if (fade) statusTimer = setTimeout(() => setStatus(''), fade);
 }
 
-// ---------- Kokoro engine ----------
+// Built-in voices can arrive a moment after page load (Chrome), so remember the request
+// and finish the switch in loadVoices() if none are listed yet.
+let wantBuiltIn = false;
+function switchToBuiltIn() {
+  const first = [...$('voice').options].find(o => !o.value.startsWith('kokoro:'));
+  wantBuiltIn = !first;
+  if (first) { $('voice').value = first.value; store.set('voice', first.value); }
+}
+
+// ---------- Kokoro engine (desktop only) ----------
 const kokoro = {
   state: 'idle',         // idle | loading | ready | error
   worker: null,
@@ -284,8 +388,9 @@ const kokoro = {
   ctx: null, src: null, paused: false,
 
   load() {
-    if (this.state === 'loading' || this.state === 'ready') return;
+    if (isMobile || this.state === 'loading' || this.state === 'ready') return;
     this.state = 'loading';
+    store.set('kokoroLoading', '1');     // cleared on success/failure; still set after a crash
     setStatus('Loading AI voice…');
     try {
       const url = URL.createObjectURL(new Blob([$('kokoroWorker').textContent], { type: 'text/javascript' }));
@@ -300,6 +405,7 @@ const kokoro = {
                   `<progress max="${m.total}" value="${m.loaded}"></progress>`);
       } else if (m.type === 'ready') {
         this.state = 'ready';
+        store.del('kokoroLoading');
         setStatus(`AI voice ready (${m.device === 'webgpu' ? 'using your GPU' : 'using CPU — may pause briefly between sentences'})`, { fade: 4000 });
       } else if (m.type === 'audio') {
         const r = this.resolvers.get(m.id);
@@ -313,13 +419,13 @@ const kokoro = {
 
   fail(msg) {
     this.state = 'error';
+    store.del('kokoroLoading');
     this.worker && this.worker.terminate();
     this.worker = null;
     for (const r of this.resolvers.values()) r(null);
     this.resolvers.clear(); this.cache.clear();
     setStatus(`Couldn't load the AI voice (${msg}). Switched to a built-in voice.`, { err: true });
-    const first = [...$('voice').options].find(o => !o.value.startsWith('kokoro:'));
-    if (first) { $('voice').value = first.value; }
+    switchToBuiltIn();
     if (playing) speakCurrent();
   },
 
@@ -386,7 +492,8 @@ function highlight(scroll = true) {
     s.el.classList.add('cur');
     if (scroll) {
       const r = s.el.getBoundingClientRect();
-      if (r.top < 110 || r.bottom > innerHeight - 60) s.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const bottomEdge = isMobile ? innerHeight - 130 : innerHeight - 60;
+      if (r.top < 110 || r.bottom > bottomEdge) s.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }
   $('progress').textContent = sentences.length ? `${cur + 1} / ${sentences.length}` : '';
@@ -422,13 +529,17 @@ function speakCurrent() {
     console.warn('TTS error', e.error);
     setPlaying(false);
   };
-  // Chrome occasionally drops a speak() issued in the same tick as cancel()
-  setTimeout(() => { if (my === gen) synth.speak(u); }, 30);
+  // Mobile Safari only allows speech that starts inside a tap, so the first sentence is
+  // spoken synchronously. After that, a short delay avoids Chrome dropping a speak()
+  // issued in the same tick as cancel().
+  if (!speechUnlocked) { speechUnlocked = true; synth.speak(u); }
+  else setTimeout(() => { if (my === gen) synth.speak(u); }, 30);
 }
 
 function setPlaying(on) {
   playing = on;
   $('playBtn').textContent = on ? '❚❚ Pause' : '▶ Play';
+  updateWakeLock();
 }
 
 function play() {
@@ -459,17 +570,31 @@ function stop(resetPos = true) {
 $('playBtn').onclick = () => playing ? pause() : play();
 $('stopBtn').onclick = () => stop();
 
-// Click a word to read from there
+// Click/tap a word to read from there. Taps don't place a text caret the way mouse clicks
+// do, so ask the browser which character is under the pointer instead.
+function caretAt(x, y) {
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    return p && { node: p.offsetNode, offset: p.offset };
+  }
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    return r && { node: r.startContainer, offset: r.startOffset };
+  }
+}
 $('reader').addEventListener('click', e => {
   const span = e.target.closest('.s');
   if (!span) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;       // selecting text, not asking to read
+  if (closeSettings()) return;               // first tap just dismisses the settings drawer
   cur = +span.dataset.i;
   offset = 0;
-  const sel = window.getSelection();
-  if (sel && sel.isCollapsed && sel.anchorNode && span.contains(sel.anchorNode)) {
-    let o = sel.anchorOffset;
+  const hit = caretAt(e.clientX, e.clientY);
+  if (hit && hit.node && hit.node.nodeType === 3 && span.contains(hit.node)) {
+    let o = hit.offset;
     const t = span.textContent;
-    while (o > 0 && /\S/.test(t[o - 1])) o--;   // back up to start of the clicked word
+    while (o > 0 && /\S/.test(t[o - 1])) o--;   // back up to start of the tapped word
     offset = o;
   }
   setPlaying(true);
@@ -497,45 +622,156 @@ $('voice').onchange = () => {
 
 // Space toggles play/pause (outside the textarea)
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSettings();
   if (e.code !== 'Space' || e.target.matches('textarea, input, select, button')) return;
   e.preventDefault();
   playing ? pause() : play();
 });
 
+// ---------- phone settings drawer ----------
+function closeSettings() {
+  if (!$('settings').classList.contains('open')) return false;
+  $('settings').classList.remove('open');
+  $('settingsBtn').setAttribute('aria-expanded', 'false');
+  return true;
+}
+$('settingsBtn').onclick = () => {
+  const open = $('settings').classList.toggle('open');
+  $('settingsBtn').setAttribute('aria-expanded', String(open));
+};
+document.addEventListener('click', e => {
+  if (!e.target.closest('#dock, #reader, dialog')) closeSettings();
+});
+
+// ---------- keep the screen on (phones) ----------
+let wakeLock = null, wakeChain = Promise.resolve();
+function updateWakeLock() {
+  wakeChain = wakeChain.then(async () => {
+    const want = $('wake').checked && playing && document.visibilityState === 'visible';
+    try {
+      if (want && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } else if (!want && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch {}
+  });
+}
+if (isMobile && 'wakeLock' in navigator) {
+  $('wakeWrap').hidden = false;
+  $('wake').checked = store.get('wake', '1') === '1';
+  $('wake').onchange = () => { store.set('wake', $('wake').checked ? '1' : '0'); updateWakeLock(); };
+  document.addEventListener('visibilitychange', updateWakeLock);   // the lock drops when the tab is hidden
+}
+
+// ---------- better-voices tips ----------
+const TIPS = {
+  ios: `
+    <p>iPhones and iPads come with much more natural voices that are free to download:</p>
+    <ol>
+      <li>Open <b>Settings → Accessibility → Spoken Content → Voices</b>.</li>
+      <li>Tap <b>English</b> (or your language).</li>
+      <li>Pick a voice — <b>Ava</b>, <b>Zoe</b>, <b>Evan</b> and <b>Nathan</b> are good choices — and tap the download icon next to its <b>Premium</b> version (or <b>Enhanced</b> if there's no Premium).</li>
+      <li>When it finishes, fully close Safari (swipe it away in the app switcher) and reopen this page.</li>
+      <li>Tap <b>⚙</b> and choose the new voice — it's marked (Premium) or (Enhanced), near the top of the list.</li>
+    </ol>
+    <p class="small">Premium voices are 100–400 MB each, so download them on Wi-Fi.</p>`,
+  android: `
+    <p>Android phones read with the phone's own text-to-speech voice, and Google's high-quality voices are free:</p>
+    <ol>
+      <li>Open <b>Settings</b> and search for <b>Text-to-speech</b>. (On Samsung: <b>Settings → General management → Text-to-speech</b>.)</li>
+      <li>Set <b>Preferred engine</b> to <b>Speech Services by Google</b>.</li>
+      <li>Tap the <b>gear icon</b> next to it → <b>Install voice data</b> → your language.</li>
+      <li>Try the voices listed there and download the one you like. It becomes the phone's default voice.</li>
+      <li>Close and reopen this page.</li>
+    </ol>
+    <p class="small">In Chrome on Android the voice list often shows one entry per language; which voice you hear is set in the phone's settings above. If voices sound robotic, update <b>Speech Services by Google</b> in the Play Store.</p>`,
+  windows: `
+    <p>The <b>AI voices</b> at the top of the voice list are the most natural option on a computer — they run on your machine after a one-time download.</p>
+    <p>For good built-in voices with no download, open this page in <b>Microsoft Edge</b>: it adds Microsoft's free <b>“Online (Natural)”</b> voices to the list (they need an internet connection).</p>`,
+  mac: `
+    <p>The <b>AI voices</b> at the top of the voice list are the most natural option — they run on your Mac after a one-time download.</p>
+    <p>For better built-in voices: <b>System Settings → Accessibility → Spoken Content → System voice → Manage Voices…</b>, then download a <b>Premium</b> or <b>Enhanced</b> voice. They show up in <b>Safari</b>'s voice list; Chrome may not list them.</p>`,
+  other: `
+    <p>The <b>AI voices</b> at the top of the voice list are the most natural option on a computer.</p>
+    <p>Built-in voices come from your operating system — check its accessibility or text-to-speech settings for higher-quality voices to download.</p>`,
+};
+$('tipsBody').innerHTML = TIPS[device];
+const openTips = () => { closeSettings(); $('tipsDlg').showModal(); };
+$('tipsBtn').onclick = openTips;
+$('tipLink').onclick = openTips;
+$('tipClose').onclick = () => { $('tip').hidden = true; store.set('tipDismissed', '1'); };
+if (isMobile && !store.get('tipDismissed', '')) $('tip').hidden = false;
+
 // ---------- voices ----------
+// macOS/iOS ship joke voices (Bubbles, Zarvox, …) that are no use for reading a novel.
+const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Good News|Hysterical|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Junior|Kathy|Ralph)\b/;
+const tier = v => {
+  const s = v.name + ' ' + v.voiceURI;
+  return /premium/i.test(s) ? 0 : /enhanced|natural|neural/i.test(s) ? 1 : /online/i.test(s) ? 1 : /eloquence/i.test(s) ? 3 : 2;
+};
+function voiceLabel(v) {
+  let name = v.name;
+  const q = /premium/i.test(v.voiceURI) ? 'Premium' : /enhanced/i.test(v.voiceURI) ? 'Enhanced' : '';
+  if (q && !name.includes(q)) name += ` (${q})`;
+  return `${name} — ${v.lang}`;
+}
 function loadVoices() {
-  voices = synth ? synth.getVoices() : [];
+  voices = synth ? synth.getVoices().filter(v => !NOVELTY.test(v.name)) : [];
   const sel = $('voice');
-  const keep = sel.value || store.get('voice', 'kokoro:af_heart');
+  const keep = sel.value || store.get('voice', '');
   sel.innerHTML = '';
 
-  const kg = document.createElement('optgroup');
-  kg.label = 'AI voices (Kokoro, runs on your computer)';
-  for (const [id, name] of KOKORO_VOICES) kg.append(new Option(name, 'kokoro:' + id));
-  sel.append(kg);
+  if (!isMobile) {
+    const kg = document.createElement('optgroup');
+    kg.label = 'AI voices (Kokoro, runs on your computer)';
+    for (const [id, name] of KOKORO_VOICES) kg.append(new Option(name, 'kokoro:' + id));
+    sel.append(kg);
+  }
 
-  if (voices.length) {
-    const lang = (navigator.language || 'en').slice(0, 2);
-    const sorted = [...voices].sort((a, b) =>
-      (b.lang.startsWith(lang) - a.lang.startsWith(lang)) ||
-      (/natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)) ||
-      a.name.localeCompare(b.name));
-    const bg = document.createElement('optgroup');
-    bg.label = 'Built-in voices';
-    for (const v of sorted) bg.append(new Option(`${v.name} (${v.lang})`, v.voiceURI));
-    sel.append(bg);
+  const lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+  const exact = v => v.lang.toLowerCase() === (navigator.language || '').toLowerCase() ? 0 : 1;
+  const sorted = [...voices].sort((a, b) => tier(a) - tier(b) || exact(a) - exact(b) || a.name.localeCompare(b.name));
+  const groups = [
+    [isMobile ? 'Voices' : 'Built-in voices', sorted.filter(v => v.lang.toLowerCase().startsWith(lang))],
+    ['Other languages', sorted.filter(v => !v.lang.toLowerCase().startsWith(lang))],
+  ];
+  for (const [label, list] of groups) {
+    if (!list.length) continue;
+    const g = document.createElement('optgroup');
+    g.label = label;
+    for (const v of list) g.append(new Option(voiceLabel(v), v.voiceURI));
+    sel.append(g);
+  }
+  if (keep && !keep.startsWith('kokoro:') && !voices.length) {
+    // Saved built-in voice, but the browser hasn't listed its voices yet: hold the choice
+    // instead of falling back to the AI voice (which would start a big download).
+    sel.prepend(new Option('Loading voices…', keep));
   }
   if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  else sel.selectedIndex = 0;   // best available: Kokoro Heart on desktop, top-quality local voice on phones
+  if (wantBuiltIn && isKokoro()) switchToBuiltIn();
 }
 loadVoices();
 if (synth) synth.onvoiceschanged = loadVoices;
 
 // ---------- init ----------
+if (isMobile) $('hint').innerHTML = 'Paste text, then tap <b>Done</b> (or Play). In reading view, tap any word to read from there.';
 $('rate').value = Math.min(+store.get('rate', '1'), 2);
 $('rateVal').textContent = (+$('rate').value).toFixed(2) + '×';
 $('text').value = store.get('text', '');
 if ($('text').value.trim()) showReader();
-if (isKokoro()) kokoro.load();
+if (store.get('kokoroLoading', '')) {
+  // The last AI-voice load never finished — most likely the tab ran out of memory and
+  // crashed. Don't retry automatically, or the page would crash again on every visit.
+  store.del('kokoroLoading');
+  if (isKokoro()) {
+    switchToBuiltIn();
+    setStatus("The AI voice didn't finish loading last time, so a built-in voice is selected. Pick an AI voice to try again.", { err: true });
+  }
+} else if (isKokoro()) kokoro.load();
 addEventListener('beforeunload', () => synth && synth.cancel());
 </script>
 </body>
