@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Novel Reader</title>
+<style>
+  :root {
+    --bg: #f7f4ee; --panel: #fffdf9; --ink: #2a2723; --muted: #7a736a;
+    --line: #e2dbcf; --accent: #8a4b2a; --hl: #f6dfae; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1a18; --panel: #242120; --ink: #e8e2d8; --muted: #9a9187;
+      --line: #3a3531; --accent: #e0a07a; --hl: #4a3b22; --err: #f2968f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel);
+           border-bottom: 1px solid var(--line); }
+  .bar { max-width: 780px; margin: 0 auto; padding: 10px 16px;
+         display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+  .bar h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 600; }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent);
+                   min-width: 90px; }
+  label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
+  select { font: inherit; font-size: 14px; max-width: 240px; padding: 4px;
+           background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+  input[type=range] { width: 110px; accent-color: var(--accent); }
+  #rateVal { min-width: 3.2em; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+  #status { max-width: 780px; margin: 0 auto; padding: 0 16px 8px; font-size: 13px; color: var(--muted); }
+  #status:empty { display: none; }
+  #status.err { color: var(--err); }
+  #status progress { width: 160px; height: 8px; vertical-align: middle; margin-left: 8px; accent-color: var(--accent); }
+
+  main { max-width: 780px; margin: 0 auto; padding: 24px 16px 120px; }
+  textarea { width: 100%; min-height: 60vh; padding: 16px; resize: vertical;
+             font: 17px/1.6 Georgia, "Times New Roman", serif; color: var(--ink);
+             background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+
+  #reader { font: 19px/1.75 Georgia, "Times New Roman", serif; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 8px; padding: 28px 32px; }
+  #reader p { margin: 0 0 1em; }
+  #reader .s { cursor: pointer; border-radius: 3px; transition: background .15s; }
+  #reader .s:hover { background: color-mix(in srgb, var(--hl) 45%, transparent); }
+  #reader .s.cur { background: var(--hl); }
+  #reader .s.cur.wait { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { background: color-mix(in srgb, var(--hl) 35%, transparent); } }
+  #progress { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  [hidden] { display: none !important; }
+  @media (max-width: 560px) { #reader { padding: 18px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Novel Reader</h1>
+    <button id="playBtn" class="primary">▶ Play</button>
+    <button id="stopBtn" title="Stop and go back to the start">■ Stop</button>
+    <label>Speed <input id="rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="rateVal">1.00×</span></label>
+    <label>Voice <select id="voice"></select></label>
+    <span class="spacer"></span>
+    <span id="progress"></span>
+    <button id="editBtn">Edit text</button>
+  </div>
+  <div id="status"></div>
+</header>
+
+<main>
+  <section id="editView">
+    <textarea id="text" placeholder="Paste your chapter here…"></textarea>
+    <p class="hint">Paste text, then press <b>Done</b> (or Play). In reading view, click any word to read from there. Space bar toggles play/pause.</p>
+    <p><button id="doneBtn" class="primary">Done</button></p>
+  </section>
+  <section id="readView" hidden>
+    <div id="reader"></div>
+  </section>
+</main>
+
+<!-- Kokoro runs in a worker so generating audio never freezes the page -->
+<script id="kokoroWorker" type="text/plain">
+// Classic worker + dynamic import: module workers are blocked on file:// pages.
+const LIB = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js';
+const MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+let tts, wanted = new Set(), chain = Promise.resolve();
+
+self.onmessage = e => {
+  const m = e.data;
+  if (m.type === 'want') { wanted = new Set(m.ids); return; }   // applied immediately, not queued
+  chain = chain.then(() => handle(m))
+    .catch(err => postMessage({ type: 'error', message: String(err && err.message || err) }));
+};
+
+// Keep downloaded model files in IndexedDB. The library's own cache uses the Cache API,
+// which can't store anything on a file:// page, so it would re-download every visit.
+const idb = new Promise((res, rej) => {
+  const r = indexedDB.open('novel-reader', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('files');
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+const idbDo = (mode, fn) => idb.then(db => new Promise((res, rej) => {
+  const tx = db.transaction('files', mode);
+  const req = fn(tx.objectStore('files'));
+  tx.oncomplete = () => res(req.result);
+  tx.onerror = () => rej(tx.error);
+}));
+const netFetch = self.fetch.bind(self);
+self.fetch = async (input, init) => {
+  const url = typeof input === 'string' ? input : input.url;
+  if (!url.includes('huggingface.co/')) return netFetch(input, init);
+  try {
+    const blob = await idbDo('readonly', s => s.get(url));
+    if (blob) return new Response(blob, { headers: { 'content-length': String(blob.size) } });
+  } catch {}
+  const res = await netFetch(input, init);
+  if (res.ok) res.clone().blob().then(b => idbDo('readwrite', s => s.put(b, url))).catch(() => {});
+  return res;
+};
+
+async function load(device, dtype) {
+  const { KokoroTTS } = await import(LIB);
+  const files = {};
+  return KokoroTTS.from_pretrained(MODEL, { device, dtype, progress_callback: p => {
+    if (p.status !== 'progress' || !p.total) return;
+    files[p.file] = [p.loaded, p.total];
+    let loaded = 0, total = 0;
+    for (const [l, t] of Object.values(files)) { loaded += l; total += t; }
+    postMessage({ type: 'progress', loaded, total });
+  }});
+}
+
+// Kokoro handles ~500 tokens per call; split very long sentences at clause breaks.
+function chunks(text) {
+  if (text.length <= 350) return [text];
+  const out = []; let buf = '';
+  for (const part of text.split(/(?<=[,;:—–])\s+/)) {
+    if (buf && (buf + ' ' + part).length > 300) { out.push(buf); buf = part; }
+    else buf = buf ? buf + ' ' + part : part;
+  }
+  if (buf) out.push(buf);
+  return out;
+}
+
+async function handle(m) {
+  if (m.type === 'load') {
+    let device = 'wasm';
+    try { if (navigator.gpu && await navigator.gpu.requestAdapter()) device = 'webgpu'; } catch {}
+    try {
+      tts = await load(device, device === 'webgpu' ? 'fp32' : 'q8');
+    } catch (err) {
+      if (device !== 'webgpu') throw err;
+      device = 'wasm';
+      tts = await load('wasm', 'q8');
+    }
+    postMessage({ type: 'ready', device });
+  } else if (m.type === 'gen') {
+    if (!wanted.has(m.id)) return postMessage({ type: 'audio', id: m.id, skipped: true });
+    const parts = [];
+    let sr = 24000;
+    for (const c of chunks(m.text)) {
+      if (!/[\p{L}\p{N}]/u.test(c)) continue;          // nothing pronounceable
+      try {
+        const a = await tts.generate(c, { voice: m.voice, speed: m.speed });
+        parts.push(a.audio); sr = a.sampling_rate;
+      } catch (err) { console.warn('Kokoro failed on:', c, err); }
+    }
+    const audio = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0; for (const p of parts) { audio.set(p, o); o += p.length; }
+    postMessage({ type: 'audio', id: m.id, audio, sr }, [audio.buffer]);
+  }
+}
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const synth = window.speechSynthesis;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('novelReader.' + k); return v == null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('novelReader.' + k, v); } catch {} },
+};
+
+let sentences = [];   // [{ text, el }]
+let cur = 0;          // index of the current sentence
+let offset = 0;       // char offset into the current sentence to start from
+let playing = false;
+let gen = 0;          // bumps on every stop/restart so stale callbacks are ignored
+let voices = [];
+
+// Kokoro voices worth using (graded C or better by the model authors)
+const KOKORO_VOICES = [
+  ['af_heart', 'Heart — US female ★'], ['af_bella', 'Bella — US female ★'],
+  ['af_nicole', 'Nicole — US female, soft'], ['af_aoede', 'Aoede — US female'],
+  ['af_kore', 'Kore — US female'], ['af_sarah', 'Sarah — US female'],
+  ['af_alloy', 'Alloy — US female'], ['af_nova', 'Nova — US female'],
+  ['am_michael', 'Michael — US male'], ['am_fenrir', 'Fenrir — US male'],
+  ['am_puck', 'Puck — US male'], ['bf_emma', 'Emma — UK female'],
+  ['bf_isabella', 'Isabella — UK female'], ['bm_george', 'George — UK male'],
+  ['bm_fable', 'Fable — UK male'],
+];
+
+// ---------- text -> sentences ----------
+const segmenter = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'sentence' }) : null;
+const ABBREV = /\b(Mr|Mrs|Ms|Dr|St|Jr|Sr|Prof|Capt|Lt|Col|Gen|Sgt|Rev|vs|etc|e\.g|i\.e)\.\s*$/i;
+function splitSentences(para) {
+  const raw = segmenter ? [...segmenter.segment(para)].map(s => s.segment)
+                        : para.match(/[^.!?…]+(?:[.!?…]+["'”’)\]]*\s*|$)/g) || [para];
+  // Re-join splits that aren't real sentence ends: "Mr. Smith", and dialogue tags like "Hi?" she said.
+  const out = [];
+  for (const s of raw) {
+    const prev = out[out.length - 1];
+    if (prev && (ABBREV.test(prev) || /^[\s"'“‘(]*[a-z]/.test(s))) out[out.length - 1] += s;
+    else out.push(s);
+  }
+  return out;
+}
+
+function render() {
+  const reader = $('reader');
+  reader.innerHTML = '';
+  sentences = [];
+  kokoro.cache.clear();
+  const paras = $('text').value.split(/\n\s*\n|\r?\n/).map(p => p.trim()).filter(Boolean);
+  for (const para of paras) {
+    const p = document.createElement('p');
+    for (const s of splitSentences(para)) {
+      if (!s.trim()) { p.append(s); continue; }
+      const span = document.createElement('span');
+      span.className = 's';
+      span.textContent = s;
+      span.dataset.i = sentences.length;
+      sentences.push({ text: s, el: span });
+      p.append(span);
+    }
+    reader.append(p);
+  }
+  if (!sentences.length) reader.innerHTML = '<p style="color:var(--muted)">Nothing to read yet — click “Edit text” and paste something.</p>';
+  cur = Math.min(+store.get('pos', 0) || 0, Math.max(sentences.length - 1, 0));
+  offset = 0;
+  highlight(false);
+}
+
+// ---------- views ----------
+function showReader() {
+  store.set('text', $('text').value);
+  render();
+  $('editView').hidden = true;
+  $('readView').hidden = false;
+  $('editBtn').textContent = 'Edit text';
+}
+function showEditor() {
+  stop(false);
+  $('editView').hidden = false;
+  $('readView').hidden = true;
+  $('editBtn').textContent = 'Reading view';
+  $('text').focus();
+}
+$('doneBtn').onclick = showReader;
+$('editBtn').onclick = () => $('editView').hidden ? showEditor() : showReader();
+
+// ---------- status line ----------
+let statusTimer;
+function setStatus(html, { err = false, fade = 0 } = {}) {
+  clearTimeout(statusTimer);
+  $('status').innerHTML = html;
+  $('status').classList.toggle('err', err);
+  if (fade) statusTimer = setTimeout(() => setStatus(''), fade);
+}
+
+// ---------- Kokoro engine ----------
+const kokoro = {
+  state: 'idle',         // idle | loading | ready | error
+  worker: null,
+  cache: new Map(),      // key -> Promise<{audio, sr} | null>
+  resolvers: new Map(),  // key -> resolve fn
+  ctx: null, src: null, paused: false,
+
+  load() {
+    if (this.state === 'loading' || this.state === 'ready') return;
+    this.state = 'loading';
+    setStatus('Loading AI voice…');
+    try {
+      const url = URL.createObjectURL(new Blob([$('kokoroWorker').textContent], { type: 'text/javascript' }));
+      this.worker = new Worker(url);
+    } catch (err) { return this.fail(err.message); }
+    this.worker.onerror = e => this.fail(e.message || 'could not start the voice worker');
+    this.worker.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'progress') {
+        const mb = n => Math.round(n / 1e6);
+        setStatus(`Loading AI voice model — ${mb(m.loaded)} / ${mb(m.total)} MB (downloads once, then loads from disk)` +
+                  `<progress max="${m.total}" value="${m.loaded}"></progress>`);
+      } else if (m.type === 'ready') {
+        this.state = 'ready';
+        setStatus(`AI voice ready (${m.device === 'webgpu' ? 'using your GPU' : 'using CPU — may pause briefly between sentences'})`, { fade: 4000 });
+      } else if (m.type === 'audio') {
+        const r = this.resolvers.get(m.id);
+        this.resolvers.delete(m.id);
+        if (m.skipped) this.cache.delete(m.id);
+        r && r(m.skipped ? null : m);
+      } else if (m.type === 'error') this.fail(m.message);
+    };
+    this.worker.postMessage({ type: 'load' });
+  },
+
+  fail(msg) {
+    this.state = 'error';
+    this.worker && this.worker.terminate();
+    this.worker = null;
+    for (const r of this.resolvers.values()) r(null);
+    this.resolvers.clear(); this.cache.clear();
+    setStatus(`Couldn't load the AI voice (${msg}). Switched to a built-in voice.`, { err: true });
+    const first = [...$('voice').options].find(o => !o.value.startsWith('kokoro:'));
+    if (first) { $('voice').value = first.value; }
+    if (playing) speakCurrent();
+  },
+
+  key: (i, off, voice, speed) => `${i}|${off}|${voice}|${speed}`,
+
+  // Ask for the current sentence plus a few ahead; anything else still queued gets skipped.
+  prepare(voice, speed) {
+    const jobs = [[cur, offset]];
+    for (let i = cur + 1; i < Math.min(cur + 4, sentences.length); i++) jobs.push([i, 0]);
+    const ids = jobs.map(([i, off]) => this.key(i, off, voice, speed));
+    this.worker.postMessage({ type: 'want', ids });          // must arrive before the gen requests
+    jobs.forEach(([i, off], n) => {
+      const id = ids[n];
+      if (this.cache.has(id)) return;
+      this.cache.set(id, new Promise(res => this.resolvers.set(id, res)));
+      this.worker.postMessage({ type: 'gen', id, text: sentences[i].text.slice(off).trim(), voice, speed });
+    });
+    for (const k of this.cache.keys()) if (!ids.includes(k) && !this.resolvers.has(k)) this.cache.delete(k);
+    return ids[0];
+  },
+
+  ensureCtx() {
+    this.ctx = this.ctx || new AudioContext();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  },
+
+  async speak(my, voice) {
+    this.ensureCtx();
+    if (this.state === 'idle') this.load();
+    if (!this.worker) return setPlaying(false);
+    const id = this.prepare(voice, +$('rate').value);
+    const el = sentences[cur].el;
+    el.classList.add('wait');
+    const res = await this.cache.get(id);
+    el.classList.remove('wait');
+    if (my !== gen) return;
+    if (!res) return speakCurrent();          // skipped or failed — fail() already switched voices
+    const buf = this.ctx.createBuffer(1, Math.max(1, res.audio.length), res.sr);
+    buf.copyToChannel(res.audio, 0);
+    const src = this.src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.ctx.destination);
+    src.onended = () => {
+      if (my !== gen) return;
+      this.src = null;
+      cur++; offset = 0;
+      speakCurrent();
+    };
+    src.start();
+  },
+
+  halt() {
+    if (this.src) { this.src.onended = null; try { this.src.stop(); } catch {} this.src = null; }
+    this.paused = false;
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+};
+
+// ---------- playback ----------
+function highlight(scroll = true) {
+  document.querySelectorAll('.s.cur').forEach(e => e.classList.remove('cur', 'wait'));
+  const s = sentences[cur];
+  if (s) {
+    s.el.classList.add('cur');
+    if (scroll) {
+      const r = s.el.getBoundingClientRect();
+      if (r.top < 110 || r.bottom > innerHeight - 60) s.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+  $('progress').textContent = sentences.length ? `${cur + 1} / ${sentences.length}` : '';
+  store.set('pos', cur);
+}
+
+const isKokoro = () => $('voice').value.startsWith('kokoro:');
+
+function halt() {       // silence everything and invalidate pending callbacks
+  gen++;
+  synth && synth.cancel();
+  kokoro.halt();
+}
+
+function speakCurrent() {
+  halt();
+  const my = gen;
+  if (cur >= sentences.length) { setPlaying(false); cur = 0; highlight(false); return; }
+  highlight();
+  if (isKokoro()) return kokoro.speak(my, $('voice').value.slice(7));
+
+  const u = new SpeechSynthesisUtterance(sentences[cur].text.slice(offset));
+  u.rate = +$('rate').value;
+  const v = voices.find(v => v.voiceURI === $('voice').value);
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.onend = () => {
+    if (my !== gen || !playing) return;
+    cur++; offset = 0;
+    speakCurrent();
+  };
+  u.onerror = e => {
+    if (my !== gen || e.error === 'interrupted' || e.error === 'canceled') return;
+    console.warn('TTS error', e.error);
+    setPlaying(false);
+  };
+  // Chrome occasionally drops a speak() issued in the same tick as cancel()
+  setTimeout(() => { if (my === gen) synth.speak(u); }, 30);
+}
+
+function setPlaying(on) {
+  playing = on;
+  $('playBtn').textContent = on ? '❚❚ Pause' : '▶ Play';
+}
+
+function play() {
+  if ($('readView').hidden) showReader();
+  if (!sentences.length) return;
+  setPlaying(true);
+  if (kokoro.paused && kokoro.src) {        // true mid-sentence resume
+    kokoro.paused = false;
+    kokoro.ctx.resume();
+  } else speakCurrent();
+}
+function pause() {
+  setPlaying(false);
+  if (isKokoro() && kokoro.src) {           // AI voice: freeze audio in place
+    kokoro.paused = true;
+    kokoro.ctx.suspend();
+  } else {                                  // built-in voice: restart the sentence on resume
+    halt();
+    offset = 0;
+  }
+}
+function stop(resetPos = true) {
+  setPlaying(false);
+  halt();
+  offset = 0;
+  if (resetPos) { cur = 0; highlight(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+}
+$('playBtn').onclick = () => playing ? pause() : play();
+$('stopBtn').onclick = () => stop();
+
+// Click a word to read from there
+$('reader').addEventListener('click', e => {
+  const span = e.target.closest('.s');
+  if (!span) return;
+  cur = +span.dataset.i;
+  offset = 0;
+  const sel = window.getSelection();
+  if (sel && sel.isCollapsed && sel.anchorNode && span.contains(sel.anchorNode)) {
+    let o = sel.anchorOffset;
+    const t = span.textContent;
+    while (o > 0 && /\S/.test(t[o - 1])) o--;   // back up to start of the clicked word
+    offset = o;
+  }
+  setPlaying(true);
+  speakCurrent();
+});
+
+// Speed/voice changes apply immediately by restarting the current sentence
+function settingsChanged() {
+  offset = 0;
+  if (playing) speakCurrent();
+  else halt();                    // a paused AI sentence would otherwise resume with old settings
+}
+let rateTimer;
+$('rate').oninput = () => {
+  $('rateVal').textContent = (+$('rate').value).toFixed(2) + '×';
+  store.set('rate', $('rate').value);
+  clearTimeout(rateTimer);
+  rateTimer = setTimeout(settingsChanged, 250);
+};
+$('voice').onchange = () => {
+  store.set('voice', $('voice').value);
+  if (isKokoro()) kokoro.load();
+  settingsChanged();
+};
+
+// Space toggles play/pause (outside the textarea)
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || e.target.matches('textarea, input, select, button')) return;
+  e.preventDefault();
+  playing ? pause() : play();
+});
+
+// ---------- voices ----------
+function loadVoices() {
+  voices = synth ? synth.getVoices() : [];
+  const sel = $('voice');
+  const keep = sel.value || store.get('voice', 'kokoro:af_heart');
+  sel.innerHTML = '';
+
+  const kg = document.createElement('optgroup');
+  kg.label = 'AI voices (Kokoro, runs on your computer)';
+  for (const [id, name] of KOKORO_VOICES) kg.append(new Option(name, 'kokoro:' + id));
+  sel.append(kg);
+
+  if (voices.length) {
+    const lang = (navigator.language || 'en').slice(0, 2);
+    const sorted = [...voices].sort((a, b) =>
+      (b.lang.startsWith(lang) - a.lang.startsWith(lang)) ||
+      (/natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)) ||
+      a.name.localeCompare(b.name));
+    const bg = document.createElement('optgroup');
+    bg.label = 'Built-in voices';
+    for (const v of sorted) bg.append(new Option(`${v.name} (${v.lang})`, v.voiceURI));
+    sel.append(bg);
+  }
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+loadVoices();
+if (synth) synth.onvoiceschanged = loadVoices;
+
+// ---------- init ----------
+$('rate').value = Math.min(+store.get('rate', '1'), 2);
+$('rateVal').textContent = (+$('rate').value).toFixed(2) + '×';
+$('text').value = store.get('text', '');
+if ($('text').value.trim()) showReader();
+if (isKokoro()) kokoro.load();
+addEventListener('beforeunload', () => synth && synth.cancel());
+</script>
+</body>
+</html>
