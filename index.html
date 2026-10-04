@@ -48,7 +48,10 @@
 
   /* Desktop: the dock's pieces sit inline in the top bar */
   #dock, #controls, #settings { display: contents; }
-  #settingsBtn, #wakeWrap { display: none; }
+  #settingsBtn, #wakeWrap, #plainWrap, #plainNote { display: none; }
+  body.plain #playBtn, body.plain #stopBtn, body.plain #wakeWrap { display: none !important; }
+  body.plain #reader .s { cursor: text; }
+  body.plain #reader .s.cur { background: none; }
 
   main { max-width: 780px; margin: 0 auto; padding: 24px 16px 120px; }
   textarea { width: 100%; min-height: 60vh; padding: 16px; resize: vertical;
@@ -97,8 +100,9 @@
     #settings label { justify-content: space-between; font-size: 15px; color: var(--ink); }
     #settings select { flex: 1; min-width: 0; width: 100%; max-width: none; font-size: 16px; padding: 8px; margin-left: 12px; }
     #settings input[type=range] { flex: 1; margin-left: 12px; }
-    #wakeWrap { display: flex; }
-    #wakeWrap[hidden] { display: none !important; }
+    #wakeWrap, #plainWrap { display: flex; }
+    #wakeWrap[hidden], #plainWrap[hidden] { display: none !important; }
+    body.plain #plainNote { display: flex; flex: 1; align-items: center; justify-content: center; text-align: center; color: var(--muted); font-size: 15px; }
     #settings button.link { align-self: flex-start; font-size: 15px; }
     #reader { padding: 18px; font-size: 18px; }
     main { padding: 16px 12px calc(120px + env(safe-area-inset-bottom)); }
@@ -113,11 +117,13 @@
       <div id="controls">
         <button id="playBtn" class="primary">▶ Play</button>
         <button id="stopBtn" title="Stop and go back to the start" aria-label="Stop">■<span class="with-label"> Stop</span></button>
+        <span id="plainNote">This page's voice is off — use Speak Screen</span>
         <button id="settingsBtn" aria-label="Speed and voice" aria-expanded="false" aria-controls="settings">⚙</button>
       </div>
       <div id="settings">
         <label>Speed <input id="rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="rateVal">1.00×</span></label>
         <label>Voice <select id="voice"></select></label>
+        <label id="plainWrap" hidden>Use iPhone's Speak Screen instead <input id="plain" type="checkbox"></label>
         <label id="wakeWrap" hidden>Keep screen on while reading <input id="wake" type="checkbox"></label>
         <button id="tipsBtn" class="link">Get better voices</button>
       </div>
@@ -564,6 +570,7 @@ function setPlaying(on) {
 
 function play() {
   if ($('readView').hidden) showReader();
+  if (plain) return;
   if (!sentences.length) return;
   setPlaying(true);
   if (kokoro.paused && kokoro.src) {        // true mid-sentence resume
@@ -608,6 +615,7 @@ $('reader').addEventListener('click', e => {
   const sel = window.getSelection();
   if (sel && !sel.isCollapsed) return;       // selecting text, not asking to read
   if (closeSettings()) return;               // first tap just dismisses the settings drawer
+  if (plain) return;                         // the phone's own reader is in charge
   cur = +span.dataset.i;
   offset = 0;
   const hit = caretAt(e.clientX, e.clientY);
@@ -686,6 +694,25 @@ if (isMobile && 'wakeLock' in navigator) {
   document.addEventListener('visibilitychange', updateWakeLock);   // the lock drops when the tab is hidden
 }
 
+// ---------- "use the phone's own reader" mode (iPhone) ----------
+// Turns off this page's voice and tap-to-read so iOS Speak Screen / Speak Selection can be
+// used without taps starting a second voice. The header is hidden from the accessibility
+// tree so Speak Screen starts at the chapter instead of reading the buttons.
+let plain = false;
+function setPlain(on) {
+  plain = on;
+  if (on) stop(false);
+  document.body.classList.toggle('plain', on);
+  document.querySelector('header').setAttribute('aria-hidden', on ? 'true' : 'false');
+  $('plain').checked = on;
+  store.set('plain', on ? '1' : '0');
+}
+if (device === 'ios') {
+  $('plainWrap').hidden = false;
+  $('plain').onchange = () => setPlain($('plain').checked);
+  setPlain(store.get('plain', '0') === '1');
+}
+
 // ---------- better-voices tips ----------
 const TIPS = {
   ios: `
@@ -694,10 +721,11 @@ const TIPS = {
     <ol>
       <li>Open <b>Settings → Accessibility → Spoken Content</b>.</li>
       <li>Under <b>Voices → English</b>, make sure your Premium voice (e.g. Zoe) is selected.</li>
-      <li>Turn on <b>Speak Screen</b> (and <b>Highlight Content</b> if you want words highlighted).</li>
-      <li>Come back here, paste your chapter, tap <b>Done</b>, then <b>swipe down with two fingers from the top of the screen</b>. iOS reads the page aloud with a small controller for pause, skip and speed.</li>
+      <li>Turn on <b>Speak Screen</b> and <b>Speech Controller</b> (and <b>Highlight Content</b> if you want words highlighted). A small floating button appears.</li>
+      <li>Back here: paste your chapter and tap <b>Done</b>. Then tap <b>⚙</b> and turn on <b>Use iPhone's Speak Screen instead</b>, so your taps don't start this page's own voice.</li>
+      <li>Tap the floating Speech Controller button and press <b>▶</b>. It has pause, skip and speed. (Or say <b>“Siri, speak screen”</b>.)</li>
     </ol>
-    <p class="small">Or turn on <b>Speak Selection</b> in the same place, then select a passage and tap <b>Speak</b> to start from any point. Speak Screen starts at the top of the page.</p>`,
+    <p class="small">To start mid-chapter, turn on <b>Speak Selection</b> in the same Settings page, then long-press a word, drag the handles over the passage and tap <b>Speak</b>.</p>`,
   android: `
     <p>Android phones read with the phone's own text-to-speech voice, and Google's high-quality voices are free:</p>
     <ol>
@@ -723,7 +751,10 @@ const openTips = () => { closeSettings(); $('tipsDlg').showModal(); };
 $('tipsBtn').onclick = openTips;
 $('tipLink').onclick = openTips;
 $('tipClose').onclick = () => { $('tip').hidden = true; store.set('tipDismissed2', '1'); };
-if (device === 'ios') $('tipText').textContent = 'Downloaded Premium voices not listed? Here’s why.';
+if (device === 'ios') {
+  $('tipText').textContent = 'Downloaded Premium voices not listed?';
+  $('tipLink').textContent = 'Here’s how to use them';
+}
 if (isMobile && !store.get('tipDismissed2', '')) $('tip').hidden = false;
 
 // ---------- voices ----------
