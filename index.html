@@ -128,7 +128,7 @@
   </div>
   <div id="status"></div>
   <div id="tip" hidden>
-    <span>Tip: your phone has free high-quality voices.</span>
+    <span id="tipText">Tip: your phone has free high-quality voices.</span>
     <button class="link" id="tipLink">How to get them</button>
     <button class="x" id="tipClose" aria-label="Dismiss tip">×</button>
   </div>
@@ -138,7 +138,7 @@
   <section id="editView">
     <textarea id="text" placeholder="Paste your chapter here…"></textarea>
     <p class="hint" id="hint">Paste text, then press <b>Done</b> (or Play). In reading view, click any word to read from there. Space bar toggles play/pause.</p>
-    <p><button id="doneBtn" class="primary">Done</button></p>
+    <p><button id="doneBtn" class="primary">Done</button> <button id="clearBtn">Clear</button></p>
   </section>
   <section id="readView" hidden>
     <div id="reader"></div>
@@ -345,6 +345,7 @@ function render() {
 
 // ---------- views ----------
 function showReader() {
+  if ($('text').value !== store.get('text', '')) store.set('pos', 0);   // new chapter: start at the top
   store.set('text', $('text').value);
   render();
   $('editView').hidden = true;
@@ -359,6 +360,25 @@ function showEditor() {
   $('text').focus();
 }
 $('doneBtn').onclick = showReader;
+
+// Clear for the next chapter, with a one-step undo until you type or paste.
+let clearedText = null;
+$('clearBtn').onclick = () => {
+  if (clearedText != null) {
+    $('text').value = clearedText;
+    clearedText = null;
+  } else {
+    clearedText = $('text').value;
+    $('text').value = '';
+  }
+  $('clearBtn').textContent = clearedText != null ? 'Undo clear' : 'Clear';
+  $('text').focus();
+};
+$('text').addEventListener('input', () => {
+  if (clearedText == null) return;
+  clearedText = null;
+  $('clearBtn').textContent = 'Clear';
+});
 $('editBtn').onclick = () => $('editView').hidden ? showEditor() : showReader();
 
 // ---------- status line ----------
@@ -669,15 +689,15 @@ if (isMobile && 'wakeLock' in navigator) {
 // ---------- better-voices tips ----------
 const TIPS = {
   ios: `
-    <p>iPhones and iPads come with much more natural voices that are free to download:</p>
+    <p><b>Why your downloaded voices aren't in the list:</b> Safari only lets web pages use the voices that come pre-installed on iOS. Premium and Enhanced voices you download in Settings (like <b>Zoe (Premium)</b>) don't show up on any website, in any browser on iPhone. That's an Apple limitation, not something this page can work around.</p>
+    <p><b>To hear your Premium voice, use iOS's own reader on this page:</b></p>
     <ol>
-      <li>Open <b>Settings → Accessibility → Spoken Content → Voices</b>.</li>
-      <li>Tap <b>English</b> (or your language).</li>
-      <li>Pick a voice — <b>Ava</b>, <b>Zoe</b>, <b>Evan</b> and <b>Nathan</b> are good choices — and tap the download icon next to its <b>Premium</b> version (or <b>Enhanced</b> if there's no Premium).</li>
-      <li>When it finishes, fully close Safari (swipe it away in the app switcher) and reopen this page.</li>
-      <li>Tap <b>⚙</b> and choose the new voice — it's marked (Premium) or (Enhanced), near the top of the list.</li>
+      <li>Open <b>Settings → Accessibility → Spoken Content</b>.</li>
+      <li>Under <b>Voices → English</b>, make sure your Premium voice (e.g. Zoe) is selected.</li>
+      <li>Turn on <b>Speak Screen</b> (and <b>Highlight Content</b> if you want words highlighted).</li>
+      <li>Come back here, paste your chapter, tap <b>Done</b>, then <b>swipe down with two fingers from the top of the screen</b>. iOS reads the page aloud with a small controller for pause, skip and speed.</li>
     </ol>
-    <p class="small">Premium voices are 100–400 MB each, so download them on Wi-Fi.</p>`,
+    <p class="small">Or turn on <b>Speak Selection</b> in the same place, then select a passage and tap <b>Speak</b> to start from any point. Speak Screen starts at the top of the page.</p>`,
   android: `
     <p>Android phones read with the phone's own text-to-speech voice, and Google's high-quality voices are free:</p>
     <ol>
@@ -693,7 +713,7 @@ const TIPS = {
     <p>For good built-in voices with no download, open this page in <b>Microsoft Edge</b>: it adds Microsoft's free <b>“Online (Natural)”</b> voices to the list (they need an internet connection).</p>`,
   mac: `
     <p>The <b>AI voices</b> at the top of the voice list are the most natural option — they run on your Mac after a one-time download.</p>
-    <p>For better built-in voices: <b>System Settings → Accessibility → Spoken Content → System voice → Manage Voices…</b>, then download a <b>Premium</b> or <b>Enhanced</b> voice. They show up in <b>Safari</b>'s voice list; Chrome may not list them.</p>`,
+    <p>For better built-in voices: <b>System Settings → Accessibility → Spoken Content → System voice → Manage Voices…</b>, then download a <b>Premium</b> or <b>Enhanced</b> voice. They show up in <b>Chrome</b> and <b>Edge</b>; Safari doesn't give web pages access to downloaded voices.</p>`,
   other: `
     <p>The <b>AI voices</b> at the top of the voice list are the most natural option on a computer.</p>
     <p>Built-in voices come from your operating system — check its accessibility or text-to-speech settings for higher-quality voices to download.</p>`,
@@ -702,8 +722,9 @@ $('tipsBody').innerHTML = TIPS[device];
 const openTips = () => { closeSettings(); $('tipsDlg').showModal(); };
 $('tipsBtn').onclick = openTips;
 $('tipLink').onclick = openTips;
-$('tipClose').onclick = () => { $('tip').hidden = true; store.set('tipDismissed', '1'); };
-if (isMobile && !store.get('tipDismissed', '')) $('tip').hidden = false;
+$('tipClose').onclick = () => { $('tip').hidden = true; store.set('tipDismissed2', '1'); };
+if (device === 'ios') $('tipText').textContent = 'Downloaded Premium voices not listed? Here’s why.';
+if (isMobile && !store.get('tipDismissed2', '')) $('tip').hidden = false;
 
 // ---------- voices ----------
 // macOS/iOS ship joke voices (Bubbles, Zarvox, …) that are no use for reading a novel.
@@ -719,7 +740,14 @@ function voiceLabel(v) {
   return `${name} — ${v.lang}`;
 }
 function loadVoices() {
-  voices = synth ? synth.getVoices().filter(v => !NOVELTY.test(v.name)) : [];
+  // iOS lists many voices twice (more after adding a language); keep one per name + language.
+  const seen = new Map();
+  for (const v of synth ? synth.getVoices() : []) {
+    if (NOVELTY.test(v.name)) continue;
+    const k = v.name + '|' + v.lang, prev = seen.get(k);
+    if (!prev || tier(v) < tier(prev)) seen.set(k, v);
+  }
+  voices = [...seen.values()];
   const sel = $('voice');
   const keep = sel.value || store.get('voice', '');
   sel.innerHTML = '';
@@ -733,7 +761,7 @@ function loadVoices() {
 
   const lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
   const exact = v => v.lang.toLowerCase() === (navigator.language || '').toLowerCase() ? 0 : 1;
-  const sorted = [...voices].sort((a, b) => tier(a) - tier(b) || exact(a) - exact(b) || a.name.localeCompare(b.name));
+  const sorted = [...voices].sort((a, b) => tier(a) - tier(b) || b.default - a.default || exact(a) - exact(b) || a.name.localeCompare(b.name));
   const groups = [
     [isMobile ? 'Voices' : 'Built-in voices', sorted.filter(v => v.lang.toLowerCase().startsWith(lang))],
     ['Other languages', sorted.filter(v => !v.lang.toLowerCase().startsWith(lang))],
